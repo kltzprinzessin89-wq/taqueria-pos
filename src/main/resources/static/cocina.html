@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Cocina</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: Arial, sans-serif; background: #1e1e1e; color: #eee; }
+        header { display: flex; justify-content: space-between; align-items: center;
+            padding: 12px 20px; background: #111; }
+        h1 { margin: 0; font-size: 22px; }
+        #estado { font-size: 14px; }
+        .on { color: #4caf50; } .off { color: #f44336; }
+        button { cursor: pointer; border: 0; border-radius: 6px; padding: 8px 12px;
+            font-size: 14px; font-weight: bold; }
+        #sonido { background: #444; color: #fff; margin-left: 12px; }
+        main { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; padding: 14px; }
+        .columna { background: #2a2a2a; border-radius: 10px; padding: 10px; min-height: 70vh; }
+        .columna h2 { margin: 4px 0 12px; font-size: 17px; text-align: center; }
+        .tarjeta { background: #fff; color: #222; border-radius: 8px; padding: 10px;
+            margin-bottom: 10px; border-left: 8px solid #999; }
+        .PENDIENTE { border-left-color: #f44336; }
+        .EN_PREPARACION { border-left-color: #ff9800; }
+        .LISTO { border-left-color: #4caf50; }
+        .cab { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 6px; }
+        .tarjeta ul { margin: 6px 0; padding-left: 18px; }
+        .nota { color: #c62828; font-size: 13px; }
+        .accion { width: 100%; margin-top: 6px; color: #fff; }
+        .PENDIENTE .accion { background: #ff9800; }
+        .EN_PREPARACION .accion { background: #4caf50; }
+        .LISTO .accion { background: #607d8b; }
+    </style>
+</head>
+<body>
+<header>
+    <h1>Cocina</h1>
+    <div>
+        <span id="estado" class="off">Desconectado</span>
+        <button id="sonido">Activar sonido</button>
+    </div>
+</header>
+
+<main>
+    <section class="columna"><h2>Por hacer</h2><div id="PENDIENTE"></div></section>
+    <section class="columna"><h2>En preparación</h2><div id="EN_PREPARACION"></div></section>
+    <section class="columna"><h2>Listo</h2><div id="LISTO"></div></section>
+</main>
+
+<script>
+    const SIGUIENTE = {
+        PENDIENTE:      { estado: "EN_PREPARACION", texto: "Empezar a preparar" },
+        EN_PREPARACION: { estado: "LISTO",          texto: "Marcar listo" },
+        LISTO:          { estado: "PAGADO",         texto: "Cobrada (quitar)" }
+    };
+
+    let sonidoActivo = false;
+    let audioCtx = null;
+    let ordenesConocidas = new Set();
+    let primeraCarga = true;
+
+    function escapar(texto) {
+        const d = document.createElement("div");
+        d.textContent = texto == null ? "" : texto;
+        return d.innerHTML;
+    }
+
+    function minutosDesde(fecha) {
+        const t = new Date(fecha.substring(0, 23));
+        return Math.max(0, Math.floor((Date.now() - t.getTime()) / 60000));
+    }
+
+    function pitar() {
+        if (!sonidoActivo || !audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.frequency.value = 880;
+        gain.gain.value = 0.2;
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.4);
+    }
+
+    document.getElementById("sonido").onclick = (e) => {
+        audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+        sonidoActivo = !sonidoActivo;
+        e.target.textContent = sonidoActivo ? "Sonido activado" : "Activar sonido";
+        if (sonidoActivo) pitar();
+    };
+
+    function tarjeta(orden) {
+        const sig = SIGUIENTE[orden.estado];
+        const lineas = orden.detalles.map(d =>
+            "<li>" + d.cantidad + " × " + escapar(d.producto) +
+            (d.notas ? '<div class="nota">' + escapar(d.notas) + "</div>" : "") + "</li>"
+        ).join("");
+        return '<div class="tarjeta ' + orden.estado + '">' +
+            '<div class="cab"><span>Mesa ' + orden.numeroMesa + "</span><span>#" + orden.id +
+            " · " + minutosDesde(orden.fechaCreacion) + " min</span></div>" +
+            "<ul>" + lineas + "</ul>" +
+            '<button class="accion" onclick="avanzar(' + orden.id + ", '" + sig.estado + "')\">" +
+            sig.texto + "</button></div>";
+    }
+
+    async function cargar() {
+        const resp = await fetch("/api/ordenes/activas");
+        const ordenes = await resp.json();
+
+        for (const col of ["PENDIENTE", "EN_PREPARACION", "LISTO"]) {
+            document.getElementById(col).innerHTML =
+                ordenes.filter(o => o.estado === col).map(tarjeta).join("");
+        }
+
+        const hayNueva = ordenes.some(o => o.estado === "PENDIENTE" && !ordenesConocidas.has(o.id));
+        if (hayNueva && !primeraCarga) pitar();
+        ordenesConocidas = new Set(ordenes.map(o => o.id));
+        primeraCarga = false;
+    }
+
+    async function avanzar(id, nuevoEstado) {
+        const resp = await fetch("/api/ordenes/" + id + "/estado", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ estado: nuevoEstado })
+        });
+        if (!resp.ok) alert("No se pudo cambiar el estado (" + resp.status + ")");
+    }
+
+    function conectar() {
+        const protocolo = location.protocol === "https:" ? "wss://" : "ws://";
+        const ws = new WebSocket(protocolo + location.host + "/ws/cocina");
+        const etiqueta = document.getElementById("estado");
+
+        ws.onopen = () => {
+            etiqueta.textContent = "Conectado";
+            etiqueta.className = "on";
+            cargar();
+        };
+        ws.onmessage = () => cargar();
+        ws.onclose = () => {
+            etiqueta.textContent = "Desconectado, reintentando...";
+            etiqueta.className = "off";
+            setTimeout(conectar, 3000);
+        };
+    }
+
+    conectar();
+    setInterval(cargar, 30000);
+</script>
+</body>
+</html>
