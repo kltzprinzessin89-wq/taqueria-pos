@@ -61,4 +61,4 @@ Para usarlo desde un celular, los dos tienen que estar en la misma red wifi y el
 
 ## Lo que aprendí
 
-Spring Boot y JPA, cómo hacer una API REST con validaciones, WebSocket para avisar en tiempo real, escribir pruebas con Mockito, y manejar Git y GitHub sin subir mi contraseña por accidente.
+Spring Boot y JPA, cómo hacer una API REST con validaciones, WebSocket para avisar en tiempo real, escribir pruebas con Mockito, y manejar Git y GitHub .
